@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#131417">
+<meta name="description" content="Dot Maze — siyah noktayı çıkışa ulaştır. Her bölüm daha büyük, daha zor. Süre ve hamle takibi, yıldız derecesi, cihazda kayıt.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Dot Maze</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23fff'/%3E%3Ccircle cx='32' cy='32' r='16' fill='%23000'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#e7e4dc; --hud:#f4f2ec; --ink:#1b1c1f; --muted:#6c6d72; --line:#cfcbc1;
+    --surround:#d8d3c8; --accent:#2f5fd0; --scrim:rgba(244,242,236,.82);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#131417; --hud:#1a1b1f; --ink:#e9e7e2; --muted:#8c8d94; --line:#2b2d33;
+      --surround:#202227; --accent:#6ba1ff; --scrim:rgba(19,20,23,.84);
+      color-scheme:dark;
+    }
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; overflow:hidden; overscroll-behavior:none; }
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--mono);
+    -webkit-font-smoothing:antialiased; -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none; user-select:none; touch-action:manipulation;
+  }
+  #app{ display:flex; flex-direction:column; height:100%; height:100dvh; }
+
+  /* ---- HUD ---- */
+  #hud{
+    flex:0 0 auto; display:flex; align-items:center; gap:12px;
+    padding:calc(10px + env(safe-area-inset-top)) max(clamp(12px,3vw,20px), env(safe-area-inset-right)) 10px max(clamp(12px,3vw,20px), env(safe-area-inset-left));
+    background:var(--hud); border-bottom:1px solid var(--line); font-size:12px; letter-spacing:.06em;
+  }
+  #hud .l{ display:flex; align-items:baseline; gap:8px; }
+  #hlevel{ font-weight:600; font-size:13px; letter-spacing:.12em; }
+  #htotal{ color:var(--accent); font-size:12px; }
+  #htime{ flex:1; text-align:center; font-variant-numeric:tabular-nums; font-size:14px; }
+  #hud .r{ display:flex; align-items:center; gap:8px; }
+  #hmoves{ font-variant-numeric:tabular-nums; min-width:5ch; text-align:right; }
+  #hmoves small{ color:var(--muted); font-size:10px; letter-spacing:.1em; margin-left:3px; }
+  #hud button{
+    width:32px; height:32px; border:1px solid var(--line); background:transparent; color:var(--ink);
+    border-radius:3px; font-size:15px; cursor:pointer; line-height:1; display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  #hud button:hover{ border-color:var(--accent); color:var(--accent); }
+  #hud svg{ width:16px; height:16px; fill:currentColor; }
+
+  /* ---- stage ---- */
+  #stage{ position:relative; flex:1 1 auto; overflow:hidden; background:var(--surround); }
+  #game{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+
+  #hint{
+    position:absolute; left:50%; top:16px; transform:translateX(-50%); white-space:nowrap;
+    color:var(--muted); font-size:12px; letter-spacing:.14em; pointer-events:none;
+    background:var(--scrim); padding:5px 12px; border-radius:3px; transition:opacity .3s ease;
+  }
+  #hint.hide{ opacity:0; }
+
+  /* ---- d-pad ---- */
+  #dpad{
+    position:absolute; right:max(14px, env(safe-area-inset-right)); bottom:max(16px, env(safe-area-inset-bottom));
+    display:grid; grid-template-columns:repeat(3,52px); grid-template-rows:repeat(3,52px); gap:5px; touch-action:none;
+  }
+  #dpad button{
+    border:1px solid var(--line); background:var(--hud); color:var(--ink); border-radius:8px;
+    font-size:16px; cursor:pointer; opacity:.92; display:flex; align-items:center; justify-content:center;
+    -webkit-user-select:none; user-select:none; touch-action:none;
+  }
+  #dpad button:active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  #dpad .up{ grid-area:1/2; } #dpad .left{ grid-area:2/1; }
+  #dpad .right{ grid-area:2/3; } #dpad .down{ grid-area:3/2; }
+  @media (pointer:fine){ #dpad{ opacity:.5; } #dpad:hover{ opacity:.9; } }
+
+  /* ---- overlays ---- */
+  .overlay{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px;
+    background:var(--scrim); backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+  }
+  .overlay[hidden]{ display:none; }
+  .card{
+    background:var(--hud); border:1px solid var(--line); border-radius:4px;
+    padding:22px 26px; text-align:center; min-width:250px; max-width:min(92vw,380px);
+    animation:pop .18s ease-out;
+  }
+  @media (prefers-reduced-motion:reduce){ .card{ animation:none; } #hint{ transition:none; } }
+  @keyframes pop{ from{ transform:scale(.94); opacity:0; } to{ transform:scale(1); opacity:1; } }
+  .done-title{ margin:0 0 6px; font-size:12px; letter-spacing:.16em; color:var(--muted); }
+  .stars{ margin:0 0 12px; font-size:28px; letter-spacing:.1em; color:var(--line); }
+  .stars b{ color:var(--accent); font-weight:400; }
+  .rows{ display:grid; gap:8px; margin:0 0 16px; text-align:left; font-variant-numeric:tabular-nums; }
+  .rows > div{ display:grid; grid-template-columns:auto 1fr; column-gap:14px; align-items:baseline; border-top:1px solid var(--line); padding-top:8px; }
+  .rows > div:first-child{ border-top:0; padding-top:0; }
+  .rows span{ font-size:10px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
+  .rows b{ font-size:20px; font-weight:600; text-align:right; }
+  .rows i{ grid-column:1/-1; font-style:normal; font-size:11px; color:var(--muted); text-align:right; }
+  .rec{ color:var(--accent); font-weight:600; letter-spacing:.08em; }
+  .btn{
+    border:0; background:var(--accent); color:#fff; border-radius:3px; padding:11px 20px;
+    font-family:inherit; font-size:12px; font-weight:600; letter-spacing:.12em; cursor:pointer; width:100%;
+  }
+  .btn.ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
+  .btn + .btn{ margin-top:8px; }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ---- stats ---- */
+  #stats .card{ text-align:left; width:min(92vw,420px); max-height:86%; display:flex; flex-direction:column; padding:18px 18px 16px; }
+  #stats h2{ margin:0 0 12px; font-size:12px; letter-spacing:.16em; color:var(--muted); font-weight:600; }
+  .sum{ display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:12px; }
+  .sum div{ background:var(--hud); padding:8px 10px; }
+  .sum b{ display:block; font-size:16px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .sum span{ font-size:9px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
+  .tbl{ overflow-y:auto; border:1px solid var(--line); margin-bottom:12px; min-height:0; }
+  table{ width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  th,td{ padding:7px 10px; text-align:right; border-bottom:1px solid var(--line); }
+  th:first-child,td:first-child{ text-align:left; }
+  th{ position:sticky; top:0; background:var(--hud); font-size:9px; letter-spacing:.14em; color:var(--muted); font-weight:600; text-transform:uppercase; }
+  tbody tr:last-child td{ border-bottom:0; }
+  td.st{ color:var(--accent); letter-spacing:.05em; }
+  .empty{ padding:18px 10px; text-align:center; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<noscript>Dot Maze için JavaScript gerekli.</noscript>
+
+<div id="app">
+  <header id="hud">
+    <div class="l"><span id="hlevel">BÖLÜM 1</span><span id="htotal">★ 0</span></div>
+    <span id="htime">0:00</span>
+    <div class="r">
+      <span id="hmoves">0<small>ADIM</small></span>
+      <button id="statsBtn" title="İstatistikler" aria-label="İstatistikler"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="8" width="3.5" height="7"/><rect x="6.25" y="1" width="3.5" height="14"/><rect x="11.5" y="5" width="3.5" height="10"/></svg></button>
+      <button id="restart" title="Bölümü yeniden başlat (R)" aria-label="Yeniden başlat">&#8635;</button>
+    </div>
+  </header>
+
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="hint">&#8592; &#8593; &#8595; &#8594; &nbsp;·&nbsp; veya kaydır</div>
+    <div id="dpad" role="group" aria-label="Yön tuşları">
+      <button class="up"    data-dir="N" aria-label="Yukarı">&#9650;</button>
+      <button class="left"  data-dir="W" aria-label="Sol">&#9664;</button>
+      <button class="right" data-dir="E" aria-label="Sağ">&#9654;</button>
+      <button class="down"  data-dir="S" aria-label="Aşağı">&#9660;</button>
+    </div>
+
+    <div id="done" class="overlay" hidden aria-live="polite">
+      <div class="card">
+        <p class="done-title">BÖLÜM <span id="dlevel">1</span> TAMAM</p>
+        <p class="stars" id="dstars"></p>
+        <div class="rows">
+          <div><span>Adım</span><b id="dmoves"></b><i id="dmovesSub"></i></div>
+          <div><span>Süre</span><b id="dtime"></b><i id="dtimeSub"></i></div>
+        </div>
+        <button class="btn" id="next">SIRADAKİ &#8594;</button>
+      </div>
+    </div>
+
+    <div id="stats" class="overlay" hidden>
+      <div class="card" role="dialog" aria-label="İstatistikler">
+        <h2>İSTATİSTİKLER</h2>
+        <div class="sum">
+          <div><b id="sLevels">0</b><span>Tamamlanan bölüm</span></div>
+          <div><b id="sStars">0</b><span>Toplam yıldız</span></div>
+          <div><b id="sMoves">0</b><span>Toplam adım</span></div>
+          <div><b id="sTime">0:00</b><span>Toplam süre</span></div>
+        </div>
+        <div class="tbl" id="sTable"></div>
+        <button class="btn" id="statsClose">KAPAT</button>
+        <button class="btn ghost" id="wipe">İLERLEMEYİ SIFIRLA</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ===== seeded PRNG =====
+  function xmur3(s){ let h=1779033703^s.length;
+    for(let i=0;i<s.length;i++){ h=Math.imul(h^s.charCodeAt(i),3432918353); h=h<<13|h>>>19; }
+    return function(){ h=Math.imul(h^h>>>16,2246822507); h=Math.imul(h^h>>>13,3266489909); return (h^=h>>>16)>>>0; }; }
+  function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+  const ri=(r,n)=>Math.floor(r()*n);
+  function shuffle(r,a){ for(let i=a.length-1;i>0;i--){ const j=ri(r,i+1),t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+  const clamp=(v,lo,hi)=>v<lo?lo:v>hi?hi:v;
+
+  // ===== maze generation =====
+  const mk=N=>Array.from({length:N},()=>new Set());
+  const link=(L,a,b)=>{ L[a].add(b); L[b].add(a); };
+  function nbi(c,cols,rows){ const x=c%cols,y=(c/cols)|0,r=[];
+    if(y>0)r.push(c-cols); if(x<cols-1)r.push(c+1); if(y<rows-1)r.push(c+cols); if(x>0)r.push(c-1); return r; }
+
+  const ALGOS = {
+    backtracker(cols,rows,rng){ const N=cols*rows,L=mk(N),seen=new Uint8Array(N),st=[0]; seen[0]=1;
+      while(st.length){ const c=st[st.length-1],o=nbi(c,cols,rows).filter(n=>!seen[n]);
+        if(o.length){ const n=o[ri(rng,o.length)]; link(L,c,n); seen[n]=1; st.push(n); } else st.pop(); } return L; },
+    prim(cols,rows,rng){ const N=cols*rows,L=mk(N),inM=new Uint8Array(N),inF=new Uint8Array(N),F=[];
+      const add=c=>{ if(!inM[c]&&!inF[c]){ inF[c]=1; F.push(c); } };
+      inM[0]=1; nbi(0,cols,rows).forEach(add);
+      while(F.length){ const k=ri(rng,F.length),f=F[k]; F[k]=F[F.length-1]; F.pop(); inF[f]=0;
+        const conn=nbi(f,cols,rows).filter(n=>inM[n]); if(conn.length) link(L,f,conn[ri(rng,conn.length)]);
+        inM[f]=1; nbi(f,cols,rows).forEach(add); } return L; },
+    kruskal(cols,rows,rng){ const N=cols*rows,L=mk(N),p=[...Array(N).keys()];
+      const find=x=>{ while(p[x]!==x){ p[x]=p[p[x]]; x=p[x]; } return x; };
+      const W=[]; for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){ const c=y*cols+x;
+        if(x<cols-1)W.push([c,c+1]); if(y<rows-1)W.push([c,c+cols]); }
+      shuffle(rng,W); for(const [a,b] of W){ const ra=find(a),rb=find(b); if(ra!==rb){ p[ra]=rb; link(L,a,b); } } return L; },
+    wilson(cols,rows,rng){ const N=cols*rows,L=mk(N),inM=new Uint8Array(N); inM[ri(rng,N)]=1;
+      for(let s=0;s<N;s++){ if(inM[s]) continue; let path=[s],cur=s; const pos=new Map([[s,0]]);
+        while(!inM[cur]){ const ns=nbi(cur,cols,rows),nx=ns[ri(rng,ns.length)];
+          if(pos.has(nx)){ const t=pos.get(nx); for(let i=t+1;i<path.length;i++) pos.delete(path[i]); path.length=t+1; cur=nx; }
+          else { pos.set(nx,path.length); path.push(nx); cur=nx; } }
+        for(let i=0;i<path.length-1;i++){ link(L,path[i],path[i+1]); inM[path[i]]=1; } } return L; },
+    sidewinder(cols,rows,rng){ const L=mk(cols*rows);
+      for(let x=0;x<cols-1;x++) link(L,x,x+1);
+      for(let y=1;y<rows;y++){ let run=[];
+        for(let x=0;x<cols;x++){ run.push(x); const east=x===cols-1;
+          if(east||rng()<0.5){ const cx=run[ri(rng,run.length)]; link(L,y*cols+cx,(y-1)*cols+cx); run=[]; }
+          else link(L,y*cols+x,y*cols+x+1); } } return L; }
+  };
+
+  function braid(L,cols,rows,rng,p){ if(p<=0) return; const N=cols*rows,d=[];
+    for(let c=0;c<N;c++) if(L[c].size===1) d.push(c);
+    shuffle(rng,d);
+    for(const c of d){ if(L[c].size!==1||rng()>p) continue;
+      const opt=nbi(c,cols,rows).filter(n=>!L[c].has(n)); if(!opt.length) continue;
+      const de=opt.filter(n=>L[n].size===1),pool=de.length?de:opt;
+      link(L,c,pool[ri(rng,pool.length)]); } }
+
+  function solve(L,cols,rows){ const N=cols*rows,prev=new Int32Array(N).fill(-1),seen=new Uint8Array(N),q=[0]; seen[0]=1;
+    for(let i=0;i<q.length;i++){ const c=q[i]; if(c===N-1) break;
+      for(const n of L[c]) if(!seen[n]){ seen[n]=1; prev[n]=c; q.push(n); } }
+    if(!seen[N-1]) return []; const path=[]; let c=N-1; while(c!==-1){ path.push(c); c=prev[c]; } return path.reverse(); }
+
+  // ===== level curve =====
+  function levelConfig(L){
+    const cols=clamp(5+Math.round((L-1)*1.15),5,40), rows=cols;
+    const algo = L<4  ? 'backtracker'
+               : L<8  ? (L%2 ? 'backtracker':'sidewinder')
+               : L<13 ? (L%2 ? 'prim':'kruskal')
+               :        (L%2 ? 'kruskal':'wilson');
+    const braiding = clamp((L-5)*0.028, 0, 0.24);
+    return { cols, rows, algo, braiding, seed:'dotmaze-L'+L };
+  }
+
+  // ===== progress (localStorage) =====
+  const KEY='dotmaze.v1';
+  const fresh=()=>({ version:2, currentLevel:1, totalStars:0, totalMoves:0, totalTimeMs:0, best:{} });
+  function loadProgress(){
+    try{ const r=JSON.parse(localStorage.getItem(KEY)); if(r&&r.version===2&&r.best) return Object.assign(fresh(),r); }catch(e){}
+    return fresh();
+  }
+  function saveProgress(){ try{ localStorage.setItem(KEY, JSON.stringify(progress)); }catch(e){} }
+  let progress = loadProgress();
+
+  // ===== state =====
+  const cv=document.getElementById('game'), ctx=cv.getContext('2d');
+  const el=id=>document.getElementById(id);
+  const REDUCE = matchMedia('(prefers-reduced-motion:reduce)').matches;
+  const MIN_UNIT=17, MAX_UNIT=40, MOVE_MS=95, REPEAT_MS=115;
+
+  let DPR=1, stageW=0, stageH=0;
+  let level=1, cfg=null, maze=null, optimalMoves=1;
+  let unit=20, pad=4, layerW=0, layerH=0, mazeLayer=null;
+  let player={ cx:0,cy:0, px:0,py:0, sx:0,sy:0, tx:0,ty:0, ncx:0,ncy:0, moving:false, t0:0 };
+  let cam={ x:0,y:0,tx:0,ty:0 };
+  let moves=0, started=false, startTime=0, elapsed=0, lastSec=-1, levelDone=false;
+  let heldDir=null, repeatT=0, inputQ=[], last=0;
+  let pausedAt=0, statsOpen=false, hidden=false;
+
+  const DIRS={ N:[0,-1], S:[0,1], E:[1,0], W:[-1,0] };
+  const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const cellCenter=(x,y)=>[ pad + x*unit + unit/2, pad + y*unit + unit/2 ];
+  const fmtTime=ms=>{ const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor(s/60)%60, ss=String(s%60).padStart(2,'0');
+    return h ? h+':'+String(m).padStart(2,'0')+':'+ss : Math.floor(s/60)+':'+ss; };
+
+  // ===== pause (stats panel / tab hidden): freezes the timer =====
+  const isPaused=()=>statsOpen||hidden;
+  function pauseTimer(){ if(!pausedAt && started && !levelDone) pausedAt=performance.now(); }
+  function resumeTimer(){ if(pausedAt){ startTime+=performance.now()-pausedAt; pausedAt=0; } }
+
+  // ===== build a level =====
+  function buildLevel(L){
+    level=L; cfg=levelConfig(L);
+    const rng=mulberry32(xmur3(cfg.seed)());
+    maze=ALGOS[cfg.algo](cfg.cols,cfg.rows,rng);
+    braid(maze,cfg.cols,cfg.rows,rng,cfg.braiding);
+    const path=solve(maze,cfg.cols,cfg.rows);
+    optimalMoves=Math.max(1,path.length-1);
+
+    player.cx=0; player.cy=0;
+    moves=0; started=false; startTime=0; elapsed=0; lastSec=-1; levelDone=false; pausedAt=0;
+    heldDir=null; inputQ.length=0;
+
+    layoutMaze();
+    const [sx,sy]=cellCenter(0,0); player.px=sx; player.py=sy; player.moving=false;
+    snapCamera();
+
+    el('done').hidden=true;
+    el('hint').classList.remove('hide');
+    el('hint').style.display = L===1 ? '' : 'none';
+    updateHud(true);
+  }
+
+  function layoutMaze(){
+    const u=Math.floor(Math.min(stageW/cfg.cols, stageH/cfg.rows));
+    unit=clamp(u, MIN_UNIT, MAX_UNIT);
+    const wt=Math.max(2, Math.round(unit*0.16));
+    pad=wt+2;
+    layerW=cfg.cols*unit + pad*2;
+    layerH=cfg.rows*unit + pad*2;
+    buildMazeLayer(wt);
+  }
+
+  function buildMazeLayer(wt){
+    mazeLayer=document.createElement('canvas');
+    mazeLayer.width=Math.ceil(layerW*DPR); mazeLayer.height=Math.ceil(layerH*DPR);
+    const m=mazeLayer.getContext('2d');
+    m.scale(DPR,DPR);
+    m.fillStyle='#fff'; m.fillRect(0,0,layerW,layerH);
+    m.translate(pad,pad);
+
+    const C=cfg.cols, R=cfg.rows;
+    m.fillStyle='rgba(0,0,0,0.09)';                       // goal cell shade
+    m.fillRect((C-1)*unit,(R-1)*unit,unit,unit);
+
+    m.strokeStyle='#000'; m.lineWidth=wt; m.lineCap='square';
+    m.beginPath();
+    for(let y=0;y<R;y++) for(let x=0;x<C;x++){
+      const i=y*C+x, L=maze[i], x0=x*unit, y0=y*unit;
+      if(!(y>0 && L.has(i-C))){ m.moveTo(x0,y0); m.lineTo(x0+unit,y0); }
+      if(!(x>0 && L.has(i-1))){ m.moveTo(x0,y0); m.lineTo(x0,y0+unit); }
+      if(y===R-1){ m.moveTo(x0,y0+unit); m.lineTo(x0+unit,y0+unit); }
+      if(x===C-1){ m.moveTo(x0+unit,y0); m.lineTo(x0+unit,y0+unit); }
+    }
+    m.stroke();
+
+    // open entrance (W of 0,0) and exit (E of C-1,R-1)
+    m.strokeStyle='#fff'; m.lineWidth=wt+2; m.lineCap='butt';
+    m.beginPath();
+    m.moveTo(0, unit*0.18); m.lineTo(0, unit*0.82);
+    m.moveTo(C*unit, (R-1)*unit + unit*0.18); m.lineTo(C*unit, (R-1)*unit + unit*0.82);
+    m.stroke();
+  }
+
+  // ===== camera =====
+  function camTarget(){
+    const tx = (layerW<=stageW) ? (layerW-stageW)/2 : clamp(player.px - stageW/2, 0, layerW-stageW);
+    const ty = (layerH<=stageH) ? (layerH-stageH)/2 : clamp(player.py - stageH/2, 0, layerH-stageH);
+    return [tx,ty];
+  }
+  function snapCamera(){ const [tx,ty]=camTarget(); cam.x=cam.tx=tx; cam.y=cam.ty=ty; }
+  function updateCamera(dt){
+    const [tx,ty]=camTarget(); cam.tx=tx; cam.ty=ty;
+    if(REDUCE){ cam.x=tx; cam.y=ty; return; }
+    const k=Math.min(1, dt/90);
+    cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k;
+  }
+
+  // ===== movement =====
+  function requestMove(dir){
+    if(levelDone || player.moving || isPaused()) return false;
+    const [dx,dy]=DIRS[dir];
+    const nx=player.cx+dx, ny=player.cy+dy;
+    if(nx<0||ny<0||nx>=cfg.cols||ny>=cfg.rows) return false;
+    const i=player.cy*cfg.cols+player.cx, ni=ny*cfg.cols+nx;
+    if(!maze[i].has(ni)) return false;                    // wall
+    if(!started){ started=true; startTime=performance.now(); el('hint').classList.add('hide'); }
+    player.sx=player.px; player.sy=player.py;
+    const [tx,ty]=cellCenter(nx,ny);
+    player.tx=tx; player.ty=ty; player.ncx=nx; player.ncy=ny;
+    player.moving=true; player.t0=performance.now();
+    moves++; updateHud();
+    return true;
+  }
+  // drain buffered taps; wall-taps are discarded, first real move stops the drain
+  function pump(){
+    while(!player.moving && !levelDone && !isPaused() && inputQ.length){
+      if(requestMove(inputQ.shift())) return;
+    }
+  }
+  function enqueue(dir){ if(isPaused()) return; inputQ.push(dir); if(inputQ.length>3) inputQ.shift(); pump(); }
+
+  function checkWin(){
+    if(player.cx===cfg.cols-1 && player.cy===cfg.rows-1) finishLevel();
+  }
+
+  function finishLevel(){
+    levelDone=true; heldDir=null; inputQ.length=0;
+    elapsed = started ? performance.now()-startTime : 0;
+    const ms = Math.round(elapsed);
+    const stars = moves/optimalMoves<=1.12 ? 3 : moves/optimalMoves<=1.6 ? 2 : 1;
+
+    const prev = progress.best[level];
+    const newMoves = !!prev && moves<prev.moves, newTime = !!prev && ms<prev.timeMs;
+    const rec = prev ? { moves:Math.min(prev.moves,moves), timeMs:Math.min(prev.timeMs,ms), stars:Math.max(prev.stars,stars) }
+                     : { moves, timeMs:ms, stars };
+    progress.best[level]=rec;
+    progress.totalStars = Object.values(progress.best).reduce((s,b)=>s+b.stars,0);
+    progress.totalMoves += moves;
+    progress.totalTimeMs += ms;
+    progress.currentLevel = Math.max(progress.currentLevel, level+1);
+    saveProgress();
+
+    el('dlevel').textContent = level;
+    el('dstars').innerHTML = '<b>'+'★'.repeat(stars)+'</b>'+'☆'.repeat(3-stars);
+    el('dmoves').innerHTML = moves + (newMoves ? ' <span class="rec">YENİ REKOR</span>' : '');
+    el('dmovesSub').textContent = 'en az '+optimalMoves+' · en iyi '+rec.moves;
+    el('dtime').innerHTML = fmtTime(ms) + (newTime ? ' <span class="rec">YENİ REKOR</span>' : '');
+    el('dtimeSub').textContent = 'en iyi '+fmtTime(rec.timeMs);
+    el('done').hidden=false;
+    el('next').focus();
+    updateHud(true);
+  }
+  function advance(){ buildLevel(level+1); }
+
+  // ===== HUD =====
+  function updateHud(force){
+    el('hlevel').textContent='BÖLÜM '+level;
+    el('htotal').textContent='★ '+progress.totalStars;
+    el('hmoves').innerHTML=moves+'<small>ADIM</small>';
+    const sec=Math.floor(elapsed/1000);
+    if(force||sec!==lastSec){ el('htime').textContent=fmtTime(elapsed); lastSec=sec; }
+  }
+
+  // ===== stats panel =====
+  function renderStats(){
+    const ids=Object.keys(progress.best).map(Number).sort((a,b)=>a-b);
+    el('sLevels').textContent=ids.length;
+    el('sStars').textContent=progress.totalStars;
+    el('sMoves').textContent=progress.totalMoves;
+    el('sTime').textContent=fmtTime(progress.totalTimeMs);
+    if(!ids.length){ el('sTable').innerHTML='<div class="empty">Henüz tamamlanan bölüm yok.</div>'; return; }
+    let h='<table><thead><tr><th>Bölüm</th><th>Yıldız</th><th>Adım</th><th>Süre</th></tr></thead><tbody>';
+    for(const id of ids){ const b=progress.best[id];
+      h+='<tr><td>'+id+'</td><td class="st">'+'★'.repeat(b.stars)+'</td><td>'+b.moves+'</td><td>'+fmtTime(b.timeMs)+'</td></tr>'; }
+    el('sTable').innerHTML=h+'</tbody></table>';
+  }
+  function openStats(){ if(statsOpen) return; statsOpen=true; heldDir=null; inputQ.length=0; pauseTimer(); renderStats(); el('stats').hidden=false; el('statsClose').focus(); }
+  function closeStats(){ if(!statsOpen) return; statsOpen=false; el('stats').hidden=true; if(!hidden) resumeTimer(); }
+
+  document.addEventListener('visibilitychange', ()=>{
+    hidden=document.hidden;
+    if(hidden){ heldDir=null; pauseTimer(); } else if(!statsOpen) resumeTimer();
+  });
+
+  // ===== main loop =====
+  function frame(ts){
+    requestAnimationFrame(frame);
+    const dt = last ? Math.min(ts-last, 50) : 16; last=ts;
+
+    if(started && !levelDone && !pausedAt){ elapsed = performance.now()-startTime; }
+
+    if(!levelDone && !player.moving && !isPaused()){
+      if(inputQ.length) pump();
+      else if(heldDir){ repeatT-=dt; if(repeatT<=0){ requestMove(heldDir); repeatT=REPEAT_MS; } }
+    }
+
+    if(player.moving){
+      const d = REDUCE ? 1 : clamp((performance.now()-player.t0)/MOVE_MS, 0, 1);
+      player.px = lerp(player.sx, player.tx, ease(d));
+      player.py = lerp(player.sy, player.ty, ease(d));
+      if(d>=1){
+        player.moving=false; player.cx=player.ncx; player.cy=player.ncy;
+        player.px=player.tx; player.py=player.ty;
+        checkWin();
+        if(!levelDone) pump();
+      }
+    }
+
+    updateCamera(dt);
+    if(started && !levelDone && !pausedAt) updateHud();
+    draw();
+  }
+
+  function draw(){
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.clearRect(0,0,stageW,stageH);
+    ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(mazeLayer, -cam.x, -cam.y, layerW, layerH);
+
+    const [gx,gy]=cellCenter(cfg.cols-1,cfg.rows-1);       // goal ring
+    const pulse = REDUCE ? 1 : 1 + 0.12*Math.sin(performance.now()/280);
+    ctx.save(); ctx.translate(gx-cam.x, gy-cam.y);
+    ctx.strokeStyle='#000'; ctx.lineWidth=Math.max(2,unit*0.13);
+    ctx.beginPath(); ctx.arc(0,0, unit*0.30*pulse, 0, Math.PI*2); ctx.stroke();
+    ctx.restore();
+
+    ctx.save(); ctx.translate(player.px-cam.x, player.py-cam.y);   // player
+    const r=Math.max(4, unit*0.30);
+    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(1.5,unit*0.07); ctx.stroke();
+    ctx.restore();
+  }
+
+  // ===== input: keyboard =====
+  const KEYMAP={ ArrowUp:'N', ArrowDown:'S', ArrowLeft:'W', ArrowRight:'E',
+    w:'N', s:'S', a:'W', d:'E', W:'N', S:'S', A:'W', D:'E' };
+  addEventListener('keydown', e=>{
+    if(e.key==='Escape'){ statsOpen ? closeStats() : openStats(); return; }
+    if(statsOpen) return;
+    if(e.key==='r'||e.key==='R'){ buildLevel(level); return; }
+    if(!el('done').hidden && (e.key===' '||e.key==='Enter')){ e.preventDefault(); advance(); return; }
+    const d=KEYMAP[e.key]; if(!d) return;
+    e.preventDefault();
+    heldDir=d; repeatT=REPEAT_MS;
+    enqueue(d);
+  });
+  addEventListener('keyup', e=>{ const d=KEYMAP[e.key]; if(d && heldDir===d) heldDir=null; });
+  addEventListener('blur', ()=>{ heldDir=null; });
+
+  // ===== input: d-pad =====
+  el('dpad').querySelectorAll('button').forEach(b=>{
+    const dir=b.dataset.dir;
+    const down=e=>{ e.preventDefault(); e.stopPropagation(); heldDir=dir; repeatT=REPEAT_MS; enqueue(dir); };
+    const up=e=>{ e.stopPropagation(); if(heldDir===dir) heldDir=null; };
+    b.addEventListener('pointerdown',down);
+    b.addEventListener('pointerup',up);
+    b.addEventListener('pointerleave',up);
+    b.addEventListener('pointercancel',up);
+  });
+
+  // ===== input: swipe on stage =====
+  let tsx=0, tsy=0, tracking=false;
+  const stage=el('stage');
+  stage.addEventListener('pointerdown', e=>{
+    if(e.target.closest('#dpad')||e.target.closest('.overlay')) return;
+    tracking=true; tsx=e.clientX; tsy=e.clientY;
+  });
+  stage.addEventListener('pointermove', e=>{ if(tracking) e.preventDefault(); }, {passive:false});
+  stage.addEventListener('pointerup', e=>{
+    if(!tracking) return; tracking=false;
+    const dx=e.clientX-tsx, dy=e.clientY-tsy;
+    if(Math.abs(dx)<24 && Math.abs(dy)<24) return;
+    enqueue(Math.abs(dx)>Math.abs(dy) ? (dx>0?'E':'W') : (dy>0?'S':'N'));
+  });
+  stage.addEventListener('pointercancel', ()=>{ tracking=false; });
+
+  el('next').addEventListener('click', advance);
+  el('done').addEventListener('click', e=>{ if(e.target.id==='done') advance(); });
+  el('restart').addEventListener('click', ()=>{ closeStats(); buildLevel(level); });
+  el('statsBtn').addEventListener('click', openStats);
+  el('statsClose').addEventListener('click', closeStats);
+  el('stats').addEventListener('click', e=>{ if(e.target.id==='stats') closeStats(); });
+  el('wipe').addEventListener('click', ()=>{
+    if(!confirm('Tüm ilerleme, rekorlar ve istatistikler silinsin mi?')) return;
+    progress=fresh(); saveProgress(); closeStats(); buildLevel(1);
+  });
+
+  // ===== resize =====
+  function resize(){
+    DPR=Math.min(window.devicePixelRatio||1, 2);
+    stageW=stage.clientWidth; stageH=stage.clientHeight;
+    cv.width=Math.round(stageW*DPR); cv.height=Math.round(stageH*DPR);
+    if(cfg){ layoutMaze(); const [cx,cy]=cellCenter(player.cx,player.cy);
+      if(!player.moving){ player.px=cx; player.py=cy; } snapCamera(); }
+  }
+  let rz=0;
+  addEventListener('resize', ()=>{ cancelAnimationFrame(rz); rz=requestAnimationFrame(resize); });
+
+  // ===== go =====
+  resize();
+  buildLevel(progress.currentLevel || 1);
+  requestAnimationFrame(frame);
+
+  // dev hook — inspect state / drive from the console
+  window.__dm = {
+    get state(){ return { level, cx:player.cx, cy:player.cy, moving:player.moving,
+      moves, optimalMoves, heldDir, queue:inputQ.slice(), levelDone, started, elapsed }; },
+    move:enqueue, restart:()=>buildLevel(level), goto:buildLevel,
+    links:(x,y)=>[...maze[y*cfg.cols+x]],
+    solution:()=>solve(maze,cfg.cols,cfg.rows),
+    progress:()=>progress
+  };
+})();
+</script>
+</body>
+</html>
